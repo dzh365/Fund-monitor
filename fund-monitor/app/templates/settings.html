@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}系统设置 - 基金监控{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1><i class="bi bi-gear-fill"></i> 系统设置</h1>
+</div>
+
+<div class="row g-4">
+    <!-- Server酱配置 -->
+    <div class="col-md-6">
+        <div class="card-dark">
+            <div class="card-header"><i class="bi bi-bell me-2"></i>Server酱推送</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">SendKey</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="set-sendkey"
+                               placeholder="SCTxxxxxxxxxxxxxxxxx">
+                        <button class="btn btn-outline-accent" onclick="testPush()">测试</button>
+                    </div>
+                    <div class="form-text">
+                        前往 <a href="https://sct.ftqq.com/" target="_blank" class="text-info">sct.ftqq.com</a> 获取 SendKey
+                    </div>
+                </div>
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" id="set-push-enabled">
+                    <label class="form-check-label" for="set-push-enabled">开启每日推送</label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 定时任务配置 -->
+    <div class="col-md-6">
+        <div class="card-dark">
+            <div class="card-header"><i class="bi bi-clock me-2"></i>定时任务</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">推送时间</label>
+                    <input type="time" class="form-control" id="set-push-time" value="20:00">
+                    <div class="form-text">建议设置在 A 股收盘后（15:00之后），净值数据一般在 19:00-20:00 更新</div>
+                </div>
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" id="set-skip-weekend" checked>
+                    <label class="form-check-label" for="set-skip-weekend">周末自动跳过</label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 系统信息 -->
+    <div class="col-12">
+        <div class="card-dark">
+            <div class="card-header"><i class="bi bi-info-circle me-2"></i>系统信息</div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="text-muted small mb-1">系统版本</div>
+                        <div>v1.0.0</div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="text-muted small mb-1">技术栈</div>
+                        <div>FastAPI + SQLAlchemy + APScheduler + ECharts</div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="text-muted small mb-1">数据源</div>
+                        <div>天天基金公开 API</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 保存按钮 -->
+<div class="mt-4 text-end">
+    <button class="btn btn-accent btn-lg" onclick="saveSettings()">
+        <i class="bi bi-check-lg"></i> 保存设置
+    </button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+setActiveNav('/settings');
+
+document.addEventListener('DOMContentLoaded', loadSettings);
+
+async function loadSettings() {
+    try {
+        const s = await api('/api/settings');
+        document.getElementById('set-sendkey').value = s.serverchan_sendkey || '';
+        document.getElementById('set-push-enabled').checked = s.push_enabled !== false;
+        document.getElementById('set-push-time').value = s.push_time || '20:00';
+        document.getElementById('set-skip-weekend').checked = s.skip_weekend !== false;
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+async function saveSettings() {
+    const data = {
+        serverchan_sendkey: document.getElementById('set-sendkey').value.trim(),
+        push_enabled: document.getElementById('set-push-enabled').checked,
+        push_time: document.getElementById('set-push-time').value,
+        skip_weekend: document.getElementById('set-skip-weekend').checked,
+    };
+
+    try {
+        await api('/api/settings', { method: 'PUT', body: data });
+        showToast('设置已保存', 'success');
+    } catch (e) { /* handled */ }
+}
+
+async function testPush() {
+    try {
+        const result = await api('/api/settings/test-push', { method: 'POST' });
+        if (result.success) {
+            showToast('测试推送成功，请检查微信', 'success');
+        } else {
+            showToast('推送失败: ' + (result.message || ''), 'error');
+        }
+    } catch (e) { /* handled */ }
+}
+</script>
+{% endblock %}

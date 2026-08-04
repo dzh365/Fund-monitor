@@ -1,0 +1,352 @@
+{% extends "base.html" %}
+{% block title %}账户详情 - 基金监控{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>
+        <a href="/accounts" class="text-decoration-none text-secondary me-2"><i class="bi bi-arrow-left"></i></a>
+        <span id="account-name">加载中…</span>
+    </h1>
+    <button class="btn btn-accent" onclick="showAddFundModal()">
+        <i class="bi bi-plus-lg"></i> 添加基金
+    </button>
+</div>
+
+<!-- 账户汇总卡片 -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="stat-card h-100">
+            <div class="label">持仓市值</div>
+            <div class="value" id="acc-market-value">--</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card h-100">
+            <div class="label">总成本</div>
+            <div class="value" id="acc-cost">--</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card h-100">
+            <div class="label">盈亏金额</div>
+            <div class="value" id="acc-profit">--</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card h-100">
+            <div class="label">收益率</div>
+            <div class="value" id="acc-pct">--</div>
+        </div>
+    </div>
+</div>
+
+<!-- 持仓饼图 -->
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card-dark">
+            <div class="card-header">持仓分布</div>
+            <div class="card-body" style="padding:.5rem">
+                <div id="chart-holding" style="height:280px"></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-8">
+        <div class="card-dark">
+            <div class="card-header">基金盈亏</div>
+            <div class="card-body" style="padding:.5rem">
+                <div id="chart-profit" style="height:280px"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 基金列表 -->
+<div class="card-dark">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>基金列表</span>
+        <span class="text-muted small" id="fund-count"></span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-dark-custom mb-0">
+                <thead>
+                    <tr>
+                        <th>基金代码</th>
+                        <th>基金名称</th>
+                        <th class="text-end">买入净值</th>
+                        <th class="text-end">最新净值</th>
+                        <th class="text-end">日涨跌</th>
+                        <th class="text-end">持有份额</th>
+                        <th class="text-end">持仓市值</th>
+                        <th class="text-end">成本</th>
+                        <th class="text-end">盈亏金额</th>
+                        <th class="text-end">收益率</th>
+                        <th class="text-center">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="fund-table-body">
+                    <tr><td colspan="11" class="text-center text-muted py-4">加载中…</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 添加基金 Modal -->
+<div class="modal fade" id="fundModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="fundModalTitle">添加基金</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="fund-edit-id">
+                <div class="mb-3">
+                    <label class="form-label">基金代码</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="fund-code" placeholder="6位数字"
+                               maxlength="6" oninput="this.value=this.value.replace(/\D/g,'')">
+                        <button class="btn btn-outline-accent" type="button" onclick="searchFund()">查询</button>
+                    </div>
+                    <div class="form-text" id="fund-name-hint"></div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">买入净值</label>
+                    <input type="number" class="form-control" id="fund-buy-price" step="0.0001" min="0">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">持有份额</label>
+                    <input type="number" class="form-control" id="fund-shares" step="0.01" min="0">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">买入日期（可选）</label>
+                    <input type="date" class="form-control" id="fund-buy-date">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline-accent" data-bs-dismiss="modal">取消</button>
+                <button class="btn btn-accent" onclick="saveFund()">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const accountId = {{ request.path_params.get('account_id', 0) }};
+setActiveNav('/accounts');
+
+let fundModal;
+
+document.addEventListener('DOMContentLoaded', () => {
+    fundModal = new bootstrap.Modal(document.getElementById('fundModal'));
+    loadAccountFunds();
+});
+
+async function loadAccountFunds() {
+    try {
+        const [funds, accounts] = await Promise.all([
+            api(`/api/accounts/${accountId}/funds`),
+            api('/api/accounts'),
+        ]);
+
+        const acc = accounts.find(a => a.id === accountId);
+        if (acc) document.getElementById('account-name').textContent = acc.name;
+
+        // 汇总
+        const totalMV = funds.reduce((s, f) => s + f.market_value, 0);
+        const totalCost = funds.reduce((s, f) => s + f.cost, 0);
+        const totalProfit = totalMV - totalCost;
+        const totalPct = totalCost ? (totalProfit / totalCost * 100) : 0;
+
+        document.getElementById('acc-market-value').textContent = '¥' + totalMV.toLocaleString();
+        document.getElementById('acc-cost').textContent = '¥' + totalCost.toLocaleString();
+        const profitEl = document.getElementById('acc-profit');
+        profitEl.textContent = formatMoney(totalProfit);
+        profitEl.className = 'value ' + profitClass(totalProfit);
+        const pctEl = document.getElementById('acc-pct');
+        pctEl.textContent = formatPct(totalPct);
+        pctEl.className = 'value ' + profitClass(totalPct);
+
+        document.getElementById('fund-count').textContent = `${funds.length} 只基金`;
+
+        // 表格
+        renderFundTable(funds);
+        // 图表
+        renderHoldingPie(funds);
+        renderProfitBar(funds);
+
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+function renderFundTable(funds) {
+    const tbody = document.getElementById('fund-table-body');
+    if (!funds.length) {
+        tbody.innerHTML = '<tr><td colspan="11" class="text-center text-muted py-4">暂无基金，点击右上角添加</td></tr>';
+        return;
+    }
+    tbody.innerHTML = funds.map(f => `
+        <tr>
+            <td><code>${f.fund_code}</code></td>
+            <td>${f.fund_name}</td>
+            <td class="text-end">${f.buy_price.toFixed(4)}</td>
+            <td class="text-end">${f.latest_nav.toFixed(4)}</td>
+            <td class="text-end ${profitClass(f.change_pct || 0)}">${f.change_pct ? formatPct(f.change_pct) : '-'}</td>
+            <td class="text-end">${f.shares.toLocaleString()}</td>
+            <td class="text-end">¥${f.market_value.toLocaleString()}</td>
+            <td class="text-end">¥${f.cost.toLocaleString()}</td>
+            <td class="text-end ${profitClass(f.profit)}">
+                <span class="${profitBadgeClass(f.profit)} badge rounded-pill px-2">${formatMoney(f.profit)}</span>
+            </td>
+            <td class="text-end ${profitClass(f.profit_pct)}">${formatPct(f.profit_pct)}</td>
+            <td class="text-center">
+                <div class="dropdown">
+                    <button class="btn btn-sm btn-outline-secondary border-0" data-bs-toggle="dropdown">
+                        <i class="bi bi-three-dots"></i>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-dark">
+                        <li><a class="dropdown-item" href="#" onclick="editFund(${f.fund_id})"><i class="bi bi-pencil me-2"></i>编辑</a></li>
+                        <li><a class="dropdown-item text-danger" href="#" onclick="deleteFund(${f.fund_id},'${f.fund_name}')"><i class="bi bi-trash me-2"></i>删除</a></li>
+                    </ul>
+                </div>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function renderHoldingPie(funds) {
+    const chart = echarts.init(document.getElementById('chart-holding'));
+    chart.setOption({
+        tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
+        legend: { bottom: 0, textStyle: { color: getThemeColor('--text-muted') }, type: 'scroll' },
+        series: [{
+            type: 'pie', radius: ['35%', '65%'],
+            label: { show: false },
+            data: funds.map(f => ({ name: f.fund_name, value: f.market_value })),
+        }],
+    });
+    window.addEventListener('resize', () => chart.resize());
+}
+
+function renderProfitBar(funds) {
+    const chart = echarts.init(document.getElementById('chart-profit'));
+    const profitColor = getThemeColor('--profit') || '#ef4444';
+    const lossColor = getThemeColor('--loss') || '#22c55e';
+    const sorted = [...funds].sort((a, b) => b.profit - a.profit);
+    chart.setOption({
+        tooltip: { trigger: 'axis' },
+        grid: { left: 10, right: 20, top: 10, bottom: 30, containLabel: true },
+        xAxis: {
+            type: 'category',
+            data: sorted.map(f => f.fund_name.length > 6 ? f.fund_name.slice(0, 6) + '…' : f.fund_name),
+            axisLine: { lineStyle: { color: getThemeColor('--border') } },
+            axisLabel: { rotate: 30, fontSize: 11 },
+        },
+        yAxis: {
+            type: 'value',
+            axisLine: { lineStyle: { color: getThemeColor('--border') } },
+            splitLine: { lineStyle: { color: getThemeColor('--border') } },
+        },
+        series: [{
+            type: 'bar', barWidth: '55%',
+            data: sorted.map(f => ({
+                value: f.profit,
+                itemStyle: {
+                    color: f.profit >= 0 ? profitColor : lossColor,
+                    borderRadius: f.profit >= 0 ? [4, 4, 0, 0] : [0, 0, 4, 4],
+                },
+            })),
+        }],
+    });
+    window.addEventListener('resize', () => chart.resize());
+}
+
+// ── 添加基金 ──────────────────────────────
+function showAddFundModal() {
+    document.getElementById('fundModalTitle').textContent = '添加基金';
+    document.getElementById('fund-edit-id').value = '';
+    document.getElementById('fund-code').value = '';
+    document.getElementById('fund-code').disabled = false;
+    document.getElementById('fund-buy-price').value = '';
+    document.getElementById('fund-shares').value = '';
+    document.getElementById('fund-buy-date').value = '';
+    document.getElementById('fund-name-hint').textContent = '';
+    fundModal.show();
+}
+
+async function searchFund() {
+    const code = document.getElementById('fund-code').value.trim();
+    if (code.length !== 6) { showToast('请输入6位基金代码', 'warning'); return; }
+
+    try {
+        const info = await api(`/api/fund/search?code=${code}`);
+        document.getElementById('fund-name-hint').textContent = `✅ ${info.fund_name} | 最新净值: ${info.nav.toFixed(4)} (${info.nav_date})`;
+        document.getElementById('fund-buy-price').value = info.nav;
+    } catch (e) {
+        document.getElementById('fund-name-hint').textContent = '❌ 未找到该基金';
+    }
+}
+
+async function saveFund() {
+    const editId = document.getElementById('fund-edit-id').value;
+    const code = document.getElementById('fund-code').value.trim();
+    const buyPrice = parseFloat(document.getElementById('fund-buy-price').value);
+    const shares = parseFloat(document.getElementById('fund-shares').value);
+    const buyDate = document.getElementById('fund-buy-date').value;
+
+    if (!code || code.length !== 6) { showToast('请输入正确的基金代码', 'warning'); return; }
+    if (!buyPrice || buyPrice <= 0) { showToast('买入净值必须大于0', 'warning'); return; }
+    if (!shares || shares <= 0) { showToast('持有份额必须大于0', 'warning'); return; }
+
+    try {
+        if (editId) {
+            await api(`/api/funds/${editId}`, {
+                method: 'PUT',
+                body: { buy_price: buyPrice, shares, buy_date: buyDate },
+            });
+            showToast('持仓已更新', 'success');
+        } else {
+            await api(`/api/accounts/${accountId}/funds`, {
+                method: 'POST',
+                body: { fund_code: code, buy_price: buyPrice, shares, buy_date: buyDate },
+            });
+            showToast('基金已添加', 'success');
+        }
+        fundModal.hide();
+        loadAccountFunds();
+    } catch (e) { /* handled */ }
+}
+
+async function editFund(fundId) {
+    // 从当前表格数据中读取
+    const rows = document.querySelectorAll('#fund-table-body tr');
+    // 简化：重新请求
+    const funds = await api(`/api/accounts/${accountId}/funds`);
+    const fund = funds.find(f => f.fund_id === fundId);
+    if (!fund) return;
+
+    document.getElementById('fundModalTitle').textContent = '编辑持仓';
+    document.getElementById('fund-edit-id').value = fundId;
+    document.getElementById('fund-code').value = fund.fund_code;
+    document.getElementById('fund-code').disabled = true;
+    document.getElementById('fund-buy-price').value = fund.buy_price;
+    document.getElementById('fund-shares').value = fund.shares;
+    document.getElementById('fund-buy-date').value = fund.buy_date || '';
+    document.getElementById('fund-name-hint').textContent = fund.fund_name;
+    fundModal.show();
+}
+
+async function deleteFund(fundId, name) {
+    if (!confirmDelete(`确认删除「${name}」？`)) return;
+    try {
+        await api(`/api/funds/${fundId}`, { method: 'DELETE' });
+        showToast('基金已删除', 'success');
+        loadAccountFunds();
+    } catch (e) { /* handled */ }
+}
+</script>
+{% endblock %}
