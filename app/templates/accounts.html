@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}资金账户 - 基金监控{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1><i class="bi bi-wallet2"></i> 资金账户</h1>
+    <button class="btn btn-accent" onclick="showAddModal()">
+        <i class="bi bi-plus-lg"></i> 新增账户
+    </button>
+</div>
+
+<div class="row g-3" id="accounts-grid">
+    <div class="col-12 text-center text-muted py-5">加载中…</div>
+</div>
+
+<!-- 新增/编辑 Modal -->
+<div class="modal fade" id="accountModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalTitle">新增账户</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-id">
+                <div class="mb-3">
+                    <label class="form-label">账户名称</label>
+                    <input type="text" class="form-control" id="acc-name" placeholder="如：支付宝、天天基金">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">备注（可选）</label>
+                    <input type="text" class="form-control" id="acc-remark" placeholder="备注信息">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline-accent" data-bs-dismiss="modal">取消</button>
+                <button class="btn btn-accent" onclick="saveAccount()">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+setActiveNav('/accounts');
+let modal;
+
+document.addEventListener('DOMContentLoaded', () => {
+    modal = new bootstrap.Modal(document.getElementById('accountModal'));
+    loadAccounts();
+});
+
+async function loadAccounts() {
+    const grid = document.getElementById('accounts-grid');
+    try {
+        const accounts = await api('/api/accounts');
+        const stats = await api('/api/dashboard/account-stats');
+
+        if (!accounts.length) {
+            grid.innerHTML = `
+                <div class="col-12 text-center py-5">
+                    <div style="font-size:3rem;opacity:.3">📂</div>
+                    <p class="text-muted mt-2">暂无资金账户，点击右上角「新增账户」开始</p>
+                </div>`;
+            return;
+        }
+
+        // 合并统计数据
+        const statsMap = {};
+        stats.forEach(s => statsMap[s.account_id] = s);
+
+        grid.innerHTML = accounts.map(a => {
+            const s = statsMap[a.id] || {};
+            const profit = s.total_profit || 0;
+            const pct = s.total_profit_pct || 0;
+            const mv = s.total_market_value || 0;
+            const cnt = s.fund_count || 0;
+            return `
+            <div class="col-md-4 col-lg-3">
+                <div class="account-card" onclick="location.href='/accounts/${a.id}'">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <h5 class="mb-0">${a.name}</h5>
+                        <div class="dropdown" onclick="event.stopPropagation()">
+                            <button class="btn btn-sm btn-outline-secondary border-0" data-bs-toggle="dropdown">
+                                <i class="bi bi-three-dots-vertical"></i>
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-dark">
+                                <li><a class="dropdown-item" href="#" onclick="editAccount(${a.id},'${a.name}','${a.remark||''}')"><i class="bi bi-pencil me-2"></i>编辑</a></li>
+                                <li><a class="dropdown-item text-danger" href="#" onclick="deleteAccount(${a.id},'${a.name}')"><i class="bi bi-trash me-2"></i>删除</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                    ${a.remark ? `<div class="text-muted small mb-2">${a.remark}</div>` : ''}
+                    <div class="d-flex justify-content-between align-items-end mt-3">
+                        <div>
+                            <div class="text-muted small">持仓市值</div>
+                            <div class="fw-bold">¥${mv.toLocaleString()}</div>
+                        </div>
+                        <div class="text-end">
+                            <div class="text-muted small">盈亏</div>
+                            <div class="fw-bold ${profitClass(profit)}">${formatMoney(profit)}</div>
+                        </div>
+                    </div>
+                    <div class="d-flex justify-content-between mt-2 pt-2" style="border-top:1px solid var(--border)">
+                        <span class="text-muted small">${cnt} 只基金</span>
+                        <span class="small ${profitClass(pct)}">${formatPct(pct)}</span>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        grid.innerHTML = '<div class="col-12 text-center text-danger py-5">加载失败</div>';
+    }
+}
+
+function showAddModal() {
+    document.getElementById('modalTitle').textContent = '新增账户';
+    document.getElementById('edit-id').value = '';
+    document.getElementById('acc-name').value = '';
+    document.getElementById('acc-remark').value = '';
+    modal.show();
+}
+
+function editAccount(id, name, remark) {
+    document.getElementById('modalTitle').textContent = '编辑账户';
+    document.getElementById('edit-id').value = id;
+    document.getElementById('acc-name').value = name;
+    document.getElementById('acc-remark').value = remark;
+    modal.show();
+}
+
+async function saveAccount() {
+    const id = document.getElementById('edit-id').value;
+    const name = document.getElementById('acc-name').value.trim();
+    const remark = document.getElementById('acc-remark').value.trim();
+
+    if (!name) { showToast('请输入账户名称', 'warning'); return; }
+
+    try {
+        if (id) {
+            await api(`/api/accounts/${id}`, { method: 'PUT', body: { name, remark } });
+            showToast('账户已更新', 'success');
+        } else {
+            await api('/api/accounts', { method: 'POST', body: { name, remark } });
+            showToast('账户已创建', 'success');
+        }
+        modal.hide();
+        loadAccounts();
+    } catch (e) { /* handled by api() */ }
+}
+
+async function deleteAccount(id, name) {
+    if (!confirmDelete(`确认删除账户「${name}」？该账户下所有基金将同时删除。`)) return;
+    try {
+        await api(`/api/accounts/${id}`, { method: 'DELETE' });
+        showToast(`账户「${name}」已删除`, 'success');
+        loadAccounts();
+    } catch (e) { /* handled */ }
+}
+</script>
+{% endblock %}
